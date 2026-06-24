@@ -1,7 +1,8 @@
 CC = gcc
-CFLAGS = -Wall -g $(shell pkg-config --libs --cflags ncursesw)
+CFLAGS = -Wall -g $(shell pkg-config --libs --cflags ncursesw) -DAPP_VERSION=\"$(DOTO_VERSION)\"
 DOTO_EXEC = doto
 DOTO_SOURCE = main.c doto.c
+DOTO_VERSION = "v0.0.0"
 
 .PHONY: all build clean
 
