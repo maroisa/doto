@@ -1,6 +1,4 @@
-#ifndef APP_VERSION
-#define APP_VERSION "v0.0.0"
-#endif
+#include <sched.h>
 
 #include "doto.h"
 
@@ -9,7 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+#include <spawn.h>
+
+extern char **environ;
 
 int route_command(int argc, char *argv[]){
     int sub_argc = argc - 2;
@@ -56,11 +59,41 @@ int handle_migrate(){
 
 int handle_init(int argc, char *argv[]){
     char* doto_path = get_doto_dir();
+    char* repo = NULL;
+    int force_flag = -1;
+    int status;
+    pid_t pid;
+
+    if (doto_path == NULL)
+        return 1;
 
     for (int i = 0; i < argc; i++) {
-        if (strcmp(argv[i], "--force") == 0){
-            rmdir(doto_path);
+        if (strcmp(argv[i], "--force") == 0)
+            force_flag = i;
+    }
+
+    if (argc == 2){
+        if (force_flag == -1){
+            printf("wrong argument.\n");
+            return 1;
         }
+
+        repo = argv[!force_flag];
+    }
+
+    if (force_flag >= 0){
+        char* command[] = {"rm", "-rf", doto_path, NULL};
+        status = posix_spawnp(&pid, "rm", NULL, NULL, command, environ);
+    }
+
+    if (status != 0){
+        fprintf(stderr, "Failed to spawn new process");
+        return 1;
+    }
+
+    if (waitpid(pid, &status, 0) == -1){
+        perror("Failed to get process.");
+        return 1;
     }
 
     printf("creating directory in %s...\n\n", doto_path);
@@ -74,11 +107,37 @@ int handle_init(int argc, char *argv[]){
         perror("Failed to create doto directory.\n");
         return 1;
     }
-    printf("Successfully initialize doto directory in %s\n", doto_path);
+
+    if (chdir(doto_path) != 0) {
+        perror("failed to go to doto's directory");
+        return 1;
+    }
 
     free(doto_path);
 
-    return 0;
+    if (repo != NULL){
+        char *command[] = {"git", "clone", repo, ".", NULL};
+        status = posix_spawnp(&pid, "git", NULL, NULL, command, environ);
+    } else {
+        char *command[] = {"git", "init", NULL};
+        status = posix_spawnp(&pid, "git", NULL, NULL, command, environ);
+    }
+
+    if (status != 0){
+        fprintf(stderr, "Failed to spawn git process.\n");
+        return 1;
+    }
+
+    if (waitpid(pid, &status, 0) == -1){
+        perror("Failed to spawn child process.");
+        return 1;
+    }
+
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 0){
+        if (repo == NULL) printf("Successfully initialize new git repository.\n");
+        else printf("Successfully clone repository.\n");
+        return 0;
+    } else return 1;
 }
 
 int handle_cd(){
@@ -103,6 +162,7 @@ int handle_cd(){
     free(doto_dir);
     return 0;
 }
+
 
 char* get_doto_dir(){
     const char *home = getenv("HOME");

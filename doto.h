@@ -1,5 +1,8 @@
 #ifndef DOTO_H
 #define DOTO_H
+#ifndef APP_VERSION
+    #define APP_VERSION "v0.0.0"
+#endif
 
 int route_command(int argc, char *argv[]);
 int print_help();
