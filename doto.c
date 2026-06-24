@@ -1,16 +1,16 @@
-#include <sched.h>
-
 #include "doto.h"
 
-#include <errno.h>
+#include <sched.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <errno.h>
+#include <spawn.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
-#include <spawn.h>
 
 extern char **environ;
 
@@ -48,7 +48,55 @@ int print_version(){
 }
 
 int handle_add(int argc, char *argv[]){
-    printf("Applying...\n");
+    char *doto_path, *cwd = NULL;
+    char *home_dir = getenv("HOME");
+    pid_t pid;
+    int status;
+
+    if (argc < 1){
+        fprintf(stderr, "input file expected.\n");
+        return 1;
+    }
+
+    doto_path = get_doto_path();
+
+    if (doto_path == NULL){
+        perror("failed to open doto directory");
+        return 1;
+    }
+
+    cwd = getcwd(NULL, 0);
+
+    if (chdir(doto_path) != 0){
+        perror("failed to go to doto directory");
+        free(doto_path);
+        free(cwd);
+        return 1;
+    }
+
+    status = system("git rev-parse --is-inside-work-tree > /dev/null 2>&1");
+    if (status != 0){
+        fprintf(stderr, "Doto directory is not a git repository.\n");
+        printf("initialize it with \"doto init --force\"\n");
+        free(doto_path);
+        free(cwd);
+        return 1;
+    }
+
+    if (chdir(cwd) != 0){
+        fprintf(stderr, "failed to go back to working directory");
+        free(doto_path);
+        free(cwd);
+        return 1;
+    }
+
+    for (int i = 0; i < argc; i++) {
+    }
+
+    free(doto_path);
+    free(cwd);
+
+
     return 0;
 }
 
@@ -58,14 +106,22 @@ int handle_migrate(){
 }
 
 int handle_init(int argc, char *argv[]){
-    char* doto_path = get_doto_dir();
-    char* repo = NULL;
+    char *doto_path, *repo = NULL;
     int force_flag = -1;
     int status;
     pid_t pid;
 
-    if (doto_path == NULL)
+    if (argc > 2){
+        fprintf(stderr, "Too much argument provided.\n");
         return 1;
+    }
+
+    doto_path = get_doto_path();
+
+    if (doto_path == NULL){
+        perror("failed to open doto directory");
+        return 1;
+    }
 
     for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--force") == 0)
@@ -75,6 +131,7 @@ int handle_init(int argc, char *argv[]){
     if (argc == 2){
         if (force_flag == -1){
             printf("wrong argument.\n");
+            free(doto_path);
             return 1;
         }
 
@@ -84,16 +141,20 @@ int handle_init(int argc, char *argv[]){
     if (force_flag >= 0){
         char* command[] = {"rm", "-rf", doto_path, NULL};
         status = posix_spawnp(&pid, "rm", NULL, NULL, command, environ);
-    }
 
-    if (status != 0){
-        fprintf(stderr, "Failed to spawn new process");
-        return 1;
-    }
+        if (status == -1){
+            perror("failed to spawn new process");
+            free(doto_path);
+            if (repo != NULL) free(repo);
+            return 1;
+        }
 
-    if (waitpid(pid, &status, 0) == -1){
-        perror("Failed to get process.");
-        return 1;
+        if (waitpid(pid, &status, 0) == -1){
+            perror("Failed to get process");
+            free(doto_path);
+            if (repo != NULL) free(repo);
+            return 1;
+        }
     }
 
     printf("creating directory in %s...\n\n", doto_path);
@@ -101,15 +162,23 @@ int handle_init(int argc, char *argv[]){
     if (mkdir(doto_path, 0755) == -1){
         if (errno == EEXIST){
             fprintf(stderr, "%s already exist.\nUse --force to overwrite\n", doto_path);
+
+            free(doto_path);
+            if (repo != NULL) free(repo);
             return 1;
         }
 
         perror("Failed to create doto directory.\n");
+
+        free(doto_path);
+        if (repo != NULL) free(repo);
         return 1;
     }
 
     if (chdir(doto_path) != 0) {
         perror("failed to go to doto's directory");
+        free(doto_path);
+        if (repo != NULL) free(repo);
         return 1;
     }
 
@@ -136,22 +205,33 @@ int handle_init(int argc, char *argv[]){
     if (WIFEXITED(status) && WEXITSTATUS(status) == 0){
         if (repo == NULL) printf("Successfully initialize new git repository.\n");
         else printf("Successfully clone repository.\n");
+
+        free(repo);
         return 0;
     } else return 1;
 }
 
 int handle_cd(){
-    char* doto_dir = get_doto_dir();
+    char* doto_path;
     char* shell = getenv("SHELL");
     if (shell == NULL){
         perror("Error changing directory");
         return 1;
     }
 
-    if (chdir(doto_dir) == -1){
+    doto_path = get_doto_path();
+    if (doto_path == NULL){
+        fprintf(stderr, "failed to get doto directory");
+        return 1;
+    }
+
+    if (chdir(doto_path) == -1){
         fprintf(stderr, "doto directory does not exist.\n run \"doto init\" to initialize\n");
+        free(doto_path);
         return 1;
     };
+
+    free(doto_path);
 
     char *args[] = {shell, NULL};
     if (execv(shell, args) == -1) {
@@ -159,12 +239,11 @@ int handle_cd(){
         return 1;
     }
 
-    free(doto_dir);
     return 0;
 }
 
 
-char* get_doto_dir(){
+char* get_doto_path(){
     const char *home = getenv("HOME");
 
     if (home == NULL || strcmp(home, "") == 0){

@@ -13,6 +13,6 @@ int handle_add(int argc, char *argv[]);
 int handle_migrate();
 int handle_cd();
 
-char* get_doto_dir();
+char* get_doto_path();
 
 #endif
