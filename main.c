@@ -6,7 +6,7 @@ int main(int argc, char *argv[]){
         printf("Argument expected.\n");
         return 1;
     } else if (argc > 4){
-        printf("Too much arguments.");
+        printf("Too much arguments.\n");
         return 1;
     }
 

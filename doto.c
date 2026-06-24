@@ -56,11 +56,10 @@ int handle_migrate(){
 
 int handle_init(int argc, char *argv[]){
     char* doto_path = get_doto_dir();
-    int isForced = 0;
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < argc; i++) {
         if (strcmp(argv[i], "--force") == 0){
-            isForced = 1;
+            rmdir(doto_path);
         }
     }
 
@@ -101,6 +100,7 @@ int handle_cd(){
         return 1;
     }
 
+    free(doto_dir);
     return 0;
 }
 
