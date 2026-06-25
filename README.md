@@ -13,22 +13,22 @@ git clone https://github.com/maroisa/doto.git
 
 **Ubuntu / Debian / Mint / Pop!_OS**
 ```bash
-sudo apt install build-essential libncurses-dev libgit2-dev libglib2.0-dev
+sudo apt install build-essential libncurses-dev libgit2-dev
 ```
 **Fedora / RHEL / CentOS**
 ```bash
 sudo dnf groupinstall "Development Tools"
-sudo dnf install ncurses-devel libgit2-devel glib2-devel
+sudo dnf install ncurses-devel libgit2-devel 
 ```
 
 **Arch Linux / Manjaro / EndeavourOS / CachyOS**
 ```bash
-sudo pacman -S base-devel ncurses libgit2 glib2
+sudo pacman -S base-devel ncurses libgit2 
 ```
 
 **Void Linux**
 ```bash
-sudo xbps-install -S base-devel ncurses-devel libgit2-devel glib-devel
+sudo xbps-install -S base-devel ncurses-devel libgit2-devel 
 ```
 
 3. Build

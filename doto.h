@@ -4,6 +4,9 @@
     #define APP_VERSION "v0.0.0"
 #endif
 
+#include <ftw.h>
+#include <sys/stat.h>
+
 int route_command(int argc, char *argv[]);
 int print_help();
 int print_version();

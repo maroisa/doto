@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -g $(shell pkg-config --libs --cflags ncursesw glib-2.0 gio-2.0 libgit2) -DAPP_VERSION=\"$(DOTO_VERSION)\"
+CFLAGS = -Wall -g $(shell pkg-config --libs --cflags ncursesw libgit2) -DAPP_VERSION=\"$(DOTO_VERSION)\"
 DOTO_EXEC = doto
 DOTO_SOURCE = main.c doto.c
 DOTO_VERSION = "v0.0.0"

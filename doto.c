@@ -1,29 +1,57 @@
-#include <git2/clone.h>
-#include <git2/errors.h>
-#include <git2/global.h>
-#include <git2/repository.h>
-#include <git2/types.h>
 #include <sched.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
-#include <errno.h>
+#include <ftw.h>
+#include <fcntl.h>
 #include <pwd.h>
 #include <spawn.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <glib.h>
-#include <glib/gstdio.h>
-#include <gio/gio.h>
 #include <git2.h>
+#include <git2/clone.h>
+#include <git2/errors.h>
+#include <git2/global.h>
+#include <git2/repository.h>
+#include <git2/types.h>
 
 
 #include "doto.h"
 
 extern char **environ;
+
+static int rm_files(const char *fpath, const struct stat *sb, int tflag, struct FTW *ftwbuf){
+    if (remove(fpath) < 0){
+        perror("failed to remove");
+        return -1;
+    }
+    return 0;
+}
+
+static int mkdir_in_doto_path(char *target_path, char *cwd, char *doto_path){
+    if (chdir(doto_path) != 0){
+        perror("failed to go to doto directory");
+        return 1;
+    }
+
+    for (char *p = target_path; *p; p++){
+        if (*p == '/'){
+            *p = '\0';
+            mkdir(target_path, 0755);
+            *p = '/';
+        }
+    }
+
+    if (chdir(cwd) != 0){
+        perror("failed to go to doto directory");
+        return 1;
+    }
+    return 0;
+}
 
 int route_command(int argc, char *argv[]){
     int sub_argc = argc - 2;
@@ -112,80 +140,87 @@ int handle_add(int argc, char *argv[]){
 
     home_len = strlen(home_dir);
 
+    struct stat stats;
+
     for (int i = 0; i < argc; i++) {
         char *absolute_path = realpath(argv[i], NULL);
         if (absolute_path == NULL){
-            perror("failed to get file");
-            free(home_dir);
+            perror("failed to get path");
             free(doto_path);
+            free(cwd);
             return 1;
         }
 
         if (strncmp(absolute_path, home_dir, home_len) != 0){
-            fprintf(stderr, "file must be in home directory: %s\n", argv[i]);
-            free(home_dir);
+            fprintf(stderr, "File %s is not in home directory!\n", absolute_path + home_len + 1);
+            free(cwd);
             free(doto_path);
             free(absolute_path);
             return 1;
         }
 
-        free(home_dir);
+        if (stat(absolute_path, &stats) == 0){
+            if (S_ISDIR(stats.st_mode)){
+                fprintf(stderr, "failed to add: %s is directory!\n -- this feature is in progress -- \n", absolute_path + home_len + 1);
+                free(cwd);
+                free(doto_path);
+                free(absolute_path);
+                return 1;
+            }
+        }
 
-        printf("copying...\n");
+        size_t dest_len = strlen(doto_path) + strlen(absolute_path + home_len) + 1;
+        char dest_path[dest_len];
+        snprintf(dest_path, dest_len, "%s%s", doto_path, absolute_path + home_len);
 
-        char *absolute_doto_path = realpath(doto_path, NULL);
+        char dest_path_copy[dest_len];
+        snprintf(dest_path_copy, dest_len, "%s", absolute_path + home_len + 1);
 
-        free(doto_path);
+        mkdir_in_doto_path(dest_path_copy, cwd, doto_path);
 
-        if (absolute_doto_path == NULL){
-            printf("doto directory not found!");
-            free(absolute_path);
+        if (stat(absolute_path, &stats) != 0){
+            fprintf(stderr, "failed to read file stat: %s\n", absolute_path + home_len + 1);
             return 1;
         }
 
-        char dest_path[512];
+        FILE *src = fopen(absolute_path, "rb");
+        FILE *dst = fopen(dest_path, "wb");
 
-        size_t dest_len = strlen(absolute_doto_path) + strlen(absolute_path + home_len) + 1;
-        snprintf(dest_path, dest_len, "%s%s", absolute_doto_path, absolute_path + home_len);
-
-        free(absolute_doto_path);
-
-        char *g_dest_path = g_path_get_dirname(dest_path);
-
-        if (g_mkdir_with_parents(g_dest_path, 0755) == -1){
-            g_printerr("Error creating directories: %s\n", g_strerror(errno));
-            g_free(g_dest_path);
-            free(absolute_path);
+        if (!src || !dst){
+            if (src) fclose(src);
+            if (dst) fclose(dst);
+            perror("failed to open/write file");
             return 1;
         }
 
-        g_free(g_dest_path);
+        char buf[65536];
+        size_t buf_size;
 
-        GFile *source_file = g_file_new_for_path(absolute_path);
-        GFile *dest_file = g_file_new_for_path(dest_path);
-        GError *error = NULL;
+        printf("adding \033[33m%s\033[0m...\n", absolute_path + home_len + 1);
+        while ((buf_size = fread(buf, 1, sizeof(buf), src)) > 0) {
+            fwrite(buf, 1, buf_size, dst);
+        }
 
-        free(absolute_path);
+        fclose(src);
+        fclose(dst);
 
-        g_file_copy(source_file, dest_file, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error);
-
-        if (error != NULL){
-            g_printerr("Error copy file: %s\n", error->message);
-            g_error_free(error);
-            g_object_unref(source_file);
-            g_object_unref(dest_file);
+        if (chmod(dest_path, stats.st_mode) != 0){
+            fprintf(stderr, "failed to copy file's permission: %s\n", absolute_path + home_len + 1);
             return 1;
         }
 
-        printf("Successfully adding your file.\n");
-        g_object_unref(source_file);
-        g_object_unref(dest_file);
+        struct timespec times[2];
+        times[0] = stats.st_atim;
+        times[1] = stats.st_mtim;
+
+        if (utimensat(AT_FDCWD, dest_path, times, 0) != 0){
+            fprintf(stderr, "failed to copy file's time: %s\n", absolute_path + home_len + 1);
+            return 1;
+        }
+        printf("success added \033[33m%s\033[0m.\n\n", absolute_path + home_len + 1);
     }
 
-    free(doto_path);
-    free(cwd);
-
-
+    printf("\033[32mcommand succeeded!\033[0m\n");
     return 0;
 }
 
@@ -198,7 +233,6 @@ int handle_init(int argc, char *argv[]){
     char *doto_path, *repo_url = NULL;
     int force_flag = -1;
     int status;
-    pid_t pid;
 
     if (argc > 2){
         fprintf(stderr, "Too much argument provided.\n");
@@ -224,49 +258,43 @@ int handle_init(int argc, char *argv[]){
             return 1;
         }
 
-        repo_url = argv[!force_flag];
+        if (argv[!force_flag] != NULL) {
+            repo_url = argv[!force_flag];
+        }
     }
 
-    if (force_flag >= 0){
-        // TODO: replace with glib function
-        char* command[] = {"rm", "-rf", doto_path, NULL};
-        status = posix_spawnp(&pid, "rm", NULL, NULL, command, environ);
-
-        if (status == -1){
-            perror("failed to spawn new process");
-            free(doto_path);
-            if (repo_url != NULL) free(repo_url);
-            return 1;
+    if (access(doto_path, F_OK) == 0){
+        if (force_flag >= 0){
+            if (nftw(doto_path, rm_files, 10, FTW_DEPTH|FTW_MOUNT|FTW_PHYS) < 0){
+                perror("Error: nftw");
+                free(doto_path);
+                if (repo_url != NULL) free(repo_url);
+                return 1;
+            }
         }
-
-        if (waitpid(pid, &status, 0) == -1){
-            perror("Failed to get process");
-            free(doto_path);
-            if (repo_url != NULL) free(repo_url);
-            return 1;
-        }
-    } else {
-        if (g_file_test(doto_path, G_FILE_TEST_IS_DIR)){
+        else {
             fprintf(stderr, "doto directory exists!\noverwrite it with --force\n");
             free(doto_path);
             if (repo_url != NULL) free(repo_url);
             return 1;
-        };
+        }
     }
-
-    printf("creating directory in %s...\n\n", doto_path);
 
     git_libgit2_init();
 
     git_repository *repo = NULL;
 
     if (repo_url != NULL){
+        printf("cloning %s...\n", repo_url);
         git_clone_options clone_opts = GIT_CLONE_OPTIONS_INIT;
         status = git_clone(&repo, repo_url, doto_path, &clone_opts);
     }
     else {
+        printf("initializing...\n");
         status = git_repository_init(&repo, doto_path, 0);
     }
+
+    printf("\n");
 
     git_repository_free(repo);
 
@@ -276,13 +304,14 @@ int handle_init(int argc, char *argv[]){
         fprintf(
             stderr,
             "Failed to %s repo: %s\n",
-            repo_url != NULL ? "initialize" : "clone",
+            repo_url != NULL ? "clone" : "initialize",
             error ? error->message : "Unknown error"
         );
         git_libgit2_shutdown();
         if (repo_url != NULL) free(repo_url);
         return 1;
     }
+    printf("successfully %s repository!\n", repo_url != NULL ? "cloned your" : "initialize empty");
 
     git_libgit2_shutdown();
 
@@ -319,7 +348,6 @@ int handle_cd(){
 
     return 0;
 }
-
 
 char* get_doto_path(){
     const char *home = getenv("HOME");
