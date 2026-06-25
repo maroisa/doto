@@ -1,3 +1,8 @@
+#include <git2/clone.h>
+#include <git2/errors.h>
+#include <git2/global.h>
+#include <git2/repository.h>
+#include <git2/types.h>
 #include <sched.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -13,6 +18,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
 #include <gio/gio.h>
+#include <git2.h>
 
 
 #include "doto.h"
@@ -79,7 +85,10 @@ int handle_add(int argc, char *argv[]){
         return 1;
     }
 
-    status = system("git rev-parse --is-inside-work-tree > /dev/null 2>&1");
+    git_libgit2_init();
+    status = git_repository_open_ext(NULL, doto_path, GIT_REPOSITORY_OPEN_NO_SEARCH, NULL);
+    git_libgit2_shutdown();
+
     if (status != 0){
         fprintf(stderr, "Doto directory is not a git repository.\n");
         printf("initialize it with \"doto init --force\"\n");
@@ -186,7 +195,7 @@ int handle_migrate(){
 }
 
 int handle_init(int argc, char *argv[]){
-    char *doto_path, *repo = NULL;
+    char *doto_path, *repo_url = NULL;
     int force_flag = -1;
     int status;
     pid_t pid;
@@ -215,80 +224,69 @@ int handle_init(int argc, char *argv[]){
             return 1;
         }
 
-        repo = argv[!force_flag];
+        repo_url = argv[!force_flag];
     }
 
     if (force_flag >= 0){
+        // TODO: replace with glib function
         char* command[] = {"rm", "-rf", doto_path, NULL};
         status = posix_spawnp(&pid, "rm", NULL, NULL, command, environ);
 
         if (status == -1){
             perror("failed to spawn new process");
             free(doto_path);
-            if (repo != NULL) free(repo);
+            if (repo_url != NULL) free(repo_url);
             return 1;
         }
 
         if (waitpid(pid, &status, 0) == -1){
             perror("Failed to get process");
             free(doto_path);
-            if (repo != NULL) free(repo);
+            if (repo_url != NULL) free(repo_url);
             return 1;
         }
+    } else {
+        if (g_file_test(doto_path, G_FILE_TEST_IS_DIR)){
+            fprintf(stderr, "doto directory exists!\noverwrite it with --force\n");
+            free(doto_path);
+            if (repo_url != NULL) free(repo_url);
+            return 1;
+        };
     }
 
     printf("creating directory in %s...\n\n", doto_path);
 
-    if (mkdir(doto_path, 0755) == -1){
-        if (errno == EEXIST){
-            fprintf(stderr, "%s already exist.\nUse --force to overwrite\n", doto_path);
+    git_libgit2_init();
 
-            free(doto_path);
-            if (repo != NULL) free(repo);
-            return 1;
-        }
+    git_repository *repo = NULL;
 
-        perror("Failed to create doto directory.\n");
-
-        free(doto_path);
-        if (repo != NULL) free(repo);
-        return 1;
+    if (repo_url != NULL){
+        git_clone_options clone_opts = GIT_CLONE_OPTIONS_INIT;
+        status = git_clone(&repo, repo_url, doto_path, &clone_opts);
+    }
+    else {
+        status = git_repository_init(&repo, doto_path, 0);
     }
 
-    if (chdir(doto_path) != 0) {
-        perror("failed to go to doto's directory");
-        free(doto_path);
-        if (repo != NULL) free(repo);
-        return 1;
-    }
-
-    free(doto_path);
-
-    if (repo != NULL){
-        char *command[] = {"git", "clone", repo, ".", NULL};
-        status = posix_spawnp(&pid, "git", NULL, NULL, command, environ);
-    } else {
-        char *command[] = {"git", "init", NULL};
-        status = posix_spawnp(&pid, "git", NULL, NULL, command, environ);
-    }
+    git_repository_free(repo);
 
     if (status != 0){
-        fprintf(stderr, "Failed to spawn git process.\n");
+        const git_error *error = git_error_last();
+        printf("after git_error\n");
+        fprintf(
+            stderr,
+            "Failed to %s repo: %s\n",
+            repo_url != NULL ? "initialize" : "clone",
+            error ? error->message : "Unknown error"
+        );
+        git_libgit2_shutdown();
+        if (repo_url != NULL) free(repo_url);
         return 1;
     }
 
-    if (waitpid(pid, &status, 0) == -1){
-        perror("Failed to spawn child process.");
-        return 1;
-    }
+    git_libgit2_shutdown();
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0){
-        if (repo == NULL) printf("Successfully initialize new git repository.\n");
-        else printf("Successfully clone repository.\n");
-
-        free(repo);
-        return 0;
-    } else return 1;
+    return 0;
 }
 
 int handle_cd(){
