@@ -1,5 +1,3 @@
-#include "doto.h"
-
 #include <sched.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -7,10 +5,17 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pwd.h>
 #include <spawn.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <glib.h>
+#include <glib/gstdio.h>
+#include <gio/gio.h>
+
+
+#include "doto.h"
 
 extern char **environ;
 
@@ -48,10 +53,10 @@ int print_version(){
 }
 
 int handle_add(int argc, char *argv[]){
-    char *doto_path, *cwd = NULL;
-    char *home_dir = getenv("HOME");
-    pid_t pid;
+    char *doto_path, *cwd, *home_dir = NULL;
+    char *home_env = getenv("HOME");
     int status;
+    size_t home_len;
 
     if (argc < 1){
         fprintf(stderr, "input file expected.\n");
@@ -90,7 +95,82 @@ int handle_add(int argc, char *argv[]){
         return 1;
     }
 
+    if (home_env != NULL) home_dir = realpath(home_env, NULL);
+    else {
+        struct passwd *pw = getpwuid(getuid());
+        if (pw && pw->pw_dir) home_dir = realpath(pw->pw_dir, NULL);
+    }
+
+    home_len = strlen(home_dir);
+
     for (int i = 0; i < argc; i++) {
+        char *absolute_path = realpath(argv[i], NULL);
+        if (absolute_path == NULL){
+            perror("failed to get file");
+            free(home_dir);
+            free(doto_path);
+            return 1;
+        }
+
+        if (strncmp(absolute_path, home_dir, home_len) != 0){
+            fprintf(stderr, "file must be in home directory: %s\n", argv[i]);
+            free(home_dir);
+            free(doto_path);
+            free(absolute_path);
+            return 1;
+        }
+
+        free(home_dir);
+
+        printf("copying...\n");
+
+        char *absolute_doto_path = realpath(doto_path, NULL);
+
+        free(doto_path);
+
+        if (absolute_doto_path == NULL){
+            printf("doto directory not found!");
+            free(absolute_path);
+            return 1;
+        }
+
+        char dest_path[512];
+
+        size_t dest_len = strlen(absolute_doto_path) + strlen(absolute_path + home_len) + 1;
+        snprintf(dest_path, dest_len, "%s%s", absolute_doto_path, absolute_path + home_len);
+
+        free(absolute_doto_path);
+
+        char *g_dest_path = g_path_get_dirname(dest_path);
+
+        if (g_mkdir_with_parents(g_dest_path, 0755) == -1){
+            g_printerr("Error creating directories: %s\n", g_strerror(errno));
+            g_free(g_dest_path);
+            free(absolute_path);
+            return 1;
+        }
+
+        g_free(g_dest_path);
+
+        GFile *source_file = g_file_new_for_path(absolute_path);
+        GFile *dest_file = g_file_new_for_path(dest_path);
+        GError *error = NULL;
+
+        free(absolute_path);
+
+        g_file_copy(source_file, dest_file, G_FILE_COPY_OVERWRITE, NULL, NULL, NULL, &error);
+
+        if (error != NULL){
+            g_printerr("Error copy file: %s\n", error->message);
+            g_error_free(error);
+            g_object_unref(source_file);
+            g_object_unref(dest_file);
+            return 1;
+        }
+
+        printf("Successfully adding your file.\n");
+        g_object_unref(source_file);
+        g_object_unref(dest_file);
     }
 
     free(doto_path);
