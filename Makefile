@@ -15,11 +15,12 @@ run: $(DOTO_SOURCE)
 
 build: $(DOTO_SOURCE)
 	@echo "Building the source..."
-	$(CC) $(CFLAGS) -o $(DOTO_EXEC) $(DOTO_SOURCE)
+	$(CC) -o $(DOTO_EXEC) $(DOTO_SOURCE) $(CFLAGS)
 
 install: $(DOTO_SOURCE)
 	@$(MAKE) build
 	@echo "\nInstalling in $(HOME)/.local/bin ..."
+	@mkdir -p $(HOME)/.local/bin
 	@mv ./doto $(HOME)/.local/bin/doto
 	@echo "\nSuccess!"
 
