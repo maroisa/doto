@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <ncurses.h>
 #include <git2.h>
 #include <git2/clone.h>
 #include <git2/errors.h>
@@ -75,7 +76,7 @@ int print_help(){
     printf("    -h, --help         Show this message\n");
     printf("    -v, --version      Show package's version\n");
     printf("    init [repository]  Initialize doto directory\n");
-    printf("    migrate            Migrate your dotfiles from git to home\n");
+    printf("    migrate            Migrate your dotfiles to home\n");
     printf("    add <file>...      add change(s) to doto directory\n");
     printf("    cd                 cd to doto directory\n");
     return 0;
@@ -225,7 +226,9 @@ int handle_add(int argc, char *argv[]){
 }
 
 int handle_migrate(){
-    printf("Migrating...\n");
+    initscr();
+    getch();
+    endwin();
     return 0;
 }
 
