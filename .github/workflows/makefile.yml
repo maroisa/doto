@@ -19,3 +19,8 @@ jobs:
     
     - name: Compile code
       run: make
+      
+    - uses: actions/upload-artifact@v7
+      name: Upload build artifact
+      with:
+        path: doto
